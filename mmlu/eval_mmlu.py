@@ -1,7 +1,5 @@
 import json
-import openai
 import numpy as np
-import time
 import re
 
 def parse_bullets(sentence):
@@ -111,20 +109,31 @@ def most_frequent(List):
     return num
 
 if __name__ == "__main__":
-    response_dict = json.load(open("mmlu_personalities_3_2.json", "r"))
-    questions = list(response_dict.keys())
+    agents = 3
+    rounds = 2
+    model = ["gpt-3.5-turbo-0301", "gpt-oss"][1]
+    buffer = ""
+    objs = []
+    with open(f"mmlu_multiagent_{model}_{agents}_{rounds}.jsonl", "r") as f:
+        for line in f:
+            buffer += line
+            try:
+                obj = json.loads(buffer)
+                objs.append(obj)
+                buffer = ""  # reset after a valid object
+            except json.JSONDecodeError:
+                # not a full JSON object yet, keep accumulating
+                continue
 
     accuracies = []
 
-    for question in questions:
-        responses, gt = response_dict[question]
-
+    for obj in objs:
+        gt = obj['answer']
         pred_solutions = []
-        for response in responses:
-            pred_solution = response[-1]['content']
+        for response in obj['turns'][-agents:]:
+            pred_solution = response['response']['content']
 
             pred_solutions.append(pred_solution)
-            # break
 
         # pred_solutions = pred_solutions[:1]
 
@@ -134,9 +143,7 @@ if __name__ == "__main__":
         if accurate is not None:
             accuracies.append(float(accurate))
         else:
-            import pdb
-            pdb.set_trace()
-            print(gt)
+            print("Skipping: ", obj['question'])
 
-        print("accuracies:", np.mean(accuracies), np.std(accuracies) / (len(accuracies) ** 0.5))
+    print("accuracies:", np.mean(accuracies), np.std(accuracies) / (len(accuracies) ** 0.5))
 

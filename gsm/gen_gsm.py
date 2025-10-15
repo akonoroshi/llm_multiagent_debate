@@ -1,7 +1,8 @@
-import openai
 import json
 import numpy as np
 import random
+from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
 
 def construct_message(agents, question, idx):
     if len(agents) == 0:
@@ -20,27 +21,40 @@ def construct_message(agents, question, idx):
 
 
 def construct_assistant_message(completion):
-    content = completion["choices"][0]["message"]["content"]
-    return {"role": "assistant", "content": content}
+    return {"role": "assistant", "content": completion.content}
 
 
 def read_jsonl(path: str):
     with open(path) as fh:
         return [json.loads(line) for line in fh.readlines() if line]
 
+def write_jsonl(path: str, data):
+    with open(path, 'w') as fh:
+        for item in data:
+            fh.write(json.dumps(item, indent=4) + '\n')
+
 if __name__ == "__main__":
     agents = 3
     rounds = 2
     random.seed(0)
+    model = ["gpt-3.5-turbo-0301", "gpt-oss"][1]
+    if "gpt" in model and not "gpt-oss" in model:
+        llm = ChatOpenAI(model_name=model, temperature=0)
+    else:
+        llm = ChatOllama(model=model)
 
-    generated_description = {}
+    generated_description = []
 
-    questions = read_jsonl("/data/vision/billf/scratch/yilundu/llm_iterative_debate/grade-school-math/grade_school_math/data/test.jsonl")
+    questions = read_jsonl("/ix1/dlitman/yua17/grade-school-math/grade_school_math/data/train.jsonl")
     random.shuffle(questions)
 
     for data in questions[:100]:
+        output = {}
         question = data['question']
         answer = data['answer']
+        output['question'] = question
+        output['answer'] = answer
+        output['turns'] = []
 
         agent_contexts = [[{"role": "user", "content": """Can you solve the following math problem? {} Explain your reasoning. Your final answer should be a single numerical number, in the form \\boxed{{answer}}, at the end of your response. """.format(question)}] for agent in range(agents)]
 
@@ -52,19 +66,16 @@ if __name__ == "__main__":
                     message = construct_message(agent_contexts_other, question, 2*round - 1)
                     agent_context.append(message)
 
-                completion = openai.ChatCompletion.create(
-                          model="gpt-3.5-turbo-0301",
-                          messages=agent_context,
-                          n=1)
+                completion = llm.invoke(agent_context)
 
                 assistant_message = construct_assistant_message(completion)
                 agent_context.append(assistant_message)
+                output['turns'].append({
+                    "agent": i,
+                    "round": round,
+                    "response": assistant_message
+                })
 
-        generated_description[question] = (agent_contexts, answer)
+        generated_description.append(output)
 
-    json.dump(generated_description, open("gsm_{}_{}.json".format(agents, rounds), "w"))
-
-    import pdb
-    pdb.set_trace()
-    print(answer)
-    print(agent_context)
+    write_jsonl(f"gsm_multiagent_{model}_{agents}_{rounds}.jsonl", generated_description)

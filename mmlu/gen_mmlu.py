@@ -3,7 +3,8 @@ import pandas as pd
 import json
 import time
 import random
-import openai
+from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
 
 def construct_message(agents, question, idx):
     if len(agents) == 0:
@@ -22,22 +23,12 @@ def construct_message(agents, question, idx):
 
 
 def construct_assistant_message(completion):
-    content = completion["choices"][0]["message"]["content"]
-    return {"role": "assistant", "content": content}
+    return {"role": "assistant", "content": completion.content}
 
 
-def generate_answer(answer_context):
-    try:
-        completion = openai.ChatCompletion.create(
-                  model="gpt-3.5-turbo-0301",
-                  messages=answer_context,
-                  n=1)
-    except:
-        print("retrying due to an error......")
-        time.sleep(20)
-        return generate_answer(answer_context)
+def generate_answer(llm, answer_context):
 
-    return completion
+    return llm.invoke(answer_context)
 
 
 def parse_question_answer(df, ix):
@@ -53,23 +44,37 @@ def parse_question_answer(df, ix):
 
     return question, answer
 
+def write_jsonl(path: str, data):
+    with open(path, 'w') as fh:
+        for item in data:
+            fh.write(json.dumps(item, indent=4) + '\n')
+
 if __name__ == "__main__":
     agents = 3
     rounds = 2
+    model = ["gpt-3.5-turbo-0301", "gpt-oss"][1]
+    if "gpt" in model and not "gpt-oss" in model:
+        llm = ChatOpenAI(model_name=model, temperature=0)
+    else:
+        llm = ChatOllama(model=model)
 
-    tasks = glob("/data/vision/billf/scratch/yilundu/llm_iterative_debate/mmlu/data/test/*.csv")
+    tasks = glob("/ix1/dlitman/yua17/mmlu/val/*.csv")
 
     dfs = [pd.read_csv(task) for task in tasks]
 
     random.seed(0)
-    response_dict = {}
+    response_dict = []
 
     for i in range(100):
+        output = {}
         df = random.choice(dfs)
         ix = len(df)
         idx = random.randint(0, ix-1)
 
         question, answer = parse_question_answer(df, idx)
+        output['question'] = question
+        output['answer'] = answer
+        output['turns'] = []
 
         agent_contexts = [[{"role": "user", "content": question}] for agent in range(agents)]
 
@@ -81,12 +86,16 @@ if __name__ == "__main__":
                     message = construct_message(agent_contexts_other, question, 2 * round - 1)
                     agent_context.append(message)
 
-                completion = generate_answer(agent_context)
+                completion = generate_answer(llm, agent_context)
 
                 assistant_message = construct_assistant_message(completion)
                 agent_context.append(assistant_message)
-                print(completion)
+                output['turns'].append({
+                    "agent": i,
+                    "round": round,
+                    "response": assistant_message
+                })
 
-        response_dict[question] = (agent_contexts, answer)
+        response_dict.append(output)
 
-    json.dump(response_dict, open("mmlu_{}_{}.json".format(agents, rounds), "w"))
+    write_jsonl(f"mmlu_multiagent_{model}_{agents}_{rounds}.jsonl", response_dict)
