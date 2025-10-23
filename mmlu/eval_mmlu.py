@@ -108,6 +108,11 @@ def most_frequent(List):
 
     return num
 
+def write_jsonl(path: str, data):
+    with open(path, 'w') as fh:
+        for item in data:
+            fh.write(json.dumps(item, indent=4) + '\n')
+
 if __name__ == "__main__":
     agents = 3
     rounds = 2
@@ -138,6 +143,7 @@ if __name__ == "__main__":
         # pred_solutions = pred_solutions[:1]
 
         accurate = compute_accuracy(gt, pred_solutions)
+        obj['accurate'] = accurate
 
 
         if accurate is not None:
@@ -146,4 +152,5 @@ if __name__ == "__main__":
             print("Skipping: ", obj['question'])
 
     print("accuracies:", np.mean(accuracies), np.std(accuracies) / (len(accuracies) ** 0.5))
+    write_jsonl(f"mmlu_multiagent_{model}_{agents}_{rounds}.jsonl", objs)
 
